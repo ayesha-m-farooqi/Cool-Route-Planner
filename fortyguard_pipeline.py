@@ -1,6 +1,10 @@
+import json
+import os
 import requests
 import time
+from dotenv import load_dotenv
 
+load_dotenv()
 class FortyGuardClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -112,6 +116,19 @@ class FortyGuardClient:
                 
         return clean_points
 
+    def save_geojson_for_frontend(self, api_response_data, filename="vegas_heatmap.geojson"):
+        """
+        Saves the raw GeoJSON map_data directly to a file for Member 3's map UI.
+        """
+        map_data = api_response_data.get("result", {}).get("map_data", {})
+        
+        if map_data:
+            with open(filename, "w") as f:
+                json.dump(map_data, f, indent=2)
+            print(f"[FortyGuard] Saved raw GeoJSON payload to {filename}!")
+        else:
+            print("[FortyGuard] Error: No map_data found in response.")
+
 
 # ==========================================
 # NEVADA / LAS VEGAS TEST HARNESS
@@ -127,7 +144,8 @@ if __name__ == "__main__":
     ]
 
     # Replace with your API key
-    client = FortyGuardClient(api_key="api_key_here")
+    api_key = os.getenv("FORTYGUARD_API_KEY")
+    client = FortyGuardClient(api_key=api_key)
     
     # Run pipeline
     raw_data = client.fetch_vegas_heatmap(VEGAS_AOI)
@@ -136,3 +154,9 @@ if __name__ == "__main__":
     print(f"\nExtracted {len(temperature_points)} temperature grid points for Las Vegas!")
     if temperature_points:
         print("Sample point:", temperature_points[0])
+    
+    # 2. Extract points for Member 2's routing math
+        points = client.extract_grid_points(raw_data)
+    
+    # 3. Save raw GeoJSON file for Member 3's Mapbox/Folium frontend!
+        client.save_geojson_for_frontend(raw_data, "vegas_heatmap.geojson")
