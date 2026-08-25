@@ -169,15 +169,24 @@ if __name__ == "__main__":
     api_key = os.getenv("FORTYGUARD_API_KEY")
     client = FortyGuardClient(api_key=api_key)
 
-    # 1. Fetch primary heatmap & save GeoJSON
+    # 1. Fetch primary 2:00 PM heatmap & save GeoJSON
+    print("--- 1. Fetching Primary Heatmap (14:00) ---")
     raw_data = client.fetch_vegas_heatmap(VEGAS_AOI, start_time="14:00")
     points = client.extract_grid_points(raw_data)
     client.save_geojson_for_frontend(raw_data, "vegas_heatmap.geojson")
 
-    # 2. Find Cooling Rest Stops for Outdoor Workers / Logistics
+    # 2. Extract & save Cooling Rest Stops
     cooling_stops = client.find_cooling_stops(points, top_n=3)
-
-    # 3. Save cooling stops to JSON for Member 3's UI markers
     with open("cooling_stops.json", "w") as f:
         json.dump(cooling_stops, f, indent=2)
     print("[FortyGuard] Saved cooling stops to cooling_stops.json!")
+
+    # 3. Task requested by Member 2: Multi-Hour Export (8am, 11am, 2pm, 5pm)
+    print("\n--- 2. Fetching Multi-Hour Temperature Data for Interpolation ---")
+    time_slots = ["08:00", "11:00", "14:00", "17:00"]
+    multi_hour_results = client.fetch_multi_hour_heatmaps(VEGAS_AOI, time_slots=time_slots)
+
+    # Export actual multi-hour output to multi_hour_data.json
+    with open("multi_hour_data.json", "w") as f:
+        json.dump(multi_hour_results, f, indent=2)
+    print("\n[FortyGuard] SUCCESS: Exported 4-slot multi-hour data to multi_hour_data.json!")
