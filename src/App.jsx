@@ -1,3 +1,4 @@
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
@@ -244,18 +245,17 @@ export default function App() {
   // Fetch initial data layers
   useEffect(() => {
     // Fetch available timeline hours
-    axios.get('http://localhost:5000/api/heatmap/timeline')
-      .then(r => {
-        if (r.data.hours) setAvailableHours(r.data.hours);
-        if (r.data.default) setSelectedHour(r.data.default);
-      })
-      .catch(() => {});
+  // Example 1: Timeline
+axios.get(`${API_BASE_URL}/api/heatmap/timeline`)
 
-    // Fetch cooling stops
-    axios.get('http://localhost:5000/api/cooling-stops')
-      .then(r => setCoolStops(r.data))
-      .catch(() => {});
-  }, []);
+// Example 2: Cooling Stops
+axios.get(`${API_BASE_URL}/api/cooling-stops`)
+
+// Example 3: Heatmap Query
+axios.get(`${API_BASE_URL}/api/heatmap?hour=${selectedHour}`)
+
+// Example 4: Fallback Heatmap
+axios.get(`${API_BASE_URL}/api/heatmap`)
 
   // Fetch heatmap for selected hour
   useEffect(() => {
