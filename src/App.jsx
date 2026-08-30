@@ -243,25 +243,31 @@ export default function App() {
 
   // Fetch initial data layers
   useEffect(() => {
-    axios.get(`${API_BASE_URL}/api/heatmap/timeline`)
-      .then(r => setAvailableHours(r.data))
+    // Fetch available timeline hours
+    axios.get('http://localhost:5000/api/heatmap/timeline')
+      .then(r => {
+        if (r.data.hours) setAvailableHours(r.data.hours);
+        if (r.data.default) setSelectedHour(r.data.default);
+      })
       .catch(() => {});
 
-    axios.get(`${API_BASE_URL}/api/cooling-stops`)
+    // Fetch cooling stops
+    axios.get('http://localhost:5000/api/cooling-stops')
       .then(r => setCoolStops(r.data))
       .catch(() => {});
   }, []);
 
   // Fetch heatmap for selected hour
   useEffect(() => {
-    axios.get(`${API_BASE_URL}/api/heatmap?hour=${selectedHour}`)
+    axios.get(`http://localhost:5000/api/heatmap?hour=${selectedHour}`)
       .then(r => setHeatPts(r.data))
       .catch(() => {
-        axios.get(`${API_BASE_URL}/api/heatmap`)
+        axios.get('http://localhost:5000/api/heatmap')
           .then(r => setHeatPts(r.data))
           .catch(() => {});
       });
   }, [selectedHour]);
+
   // Timeline auto-playback
   useEffect(() => {
     let interval = null;
