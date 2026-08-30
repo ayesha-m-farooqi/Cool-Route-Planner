@@ -120,7 +120,7 @@ const BASEMAPS = {
     name: 'Clean Streets',
     icon: '🗺️',
     base: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    attribution: '&copy; OpenStreetMap contributors',
     subdomains: ['a', 'b', 'c'],
     maxZoom: 19,
   },
@@ -244,25 +244,21 @@ export default function App() {
 
   // Fetch initial data layers
   useEffect(() => {
-    // Fetch available timeline hours
-  // Example 1: Timeline
-axios.get(`${API_BASE_URL}/api/heatmap/timeline`)
+    axios.get(`${API_BASE_URL}/api/heatmap/timeline`)
+      .then(r => setAvailableHours(r.data))
+      .catch(() => {});
 
-// Example 2: Cooling Stops
-axios.get(`${API_BASE_URL}/api/cooling-stops`)
-
-// Example 3: Heatmap Query
-axios.get(`${API_BASE_URL}/api/heatmap?hour=${selectedHour}`)
-
-// Example 4: Fallback Heatmap
-axios.get(`${API_BASE_URL}/api/heatmap`)
+    axios.get(`${API_BASE_URL}/api/cooling-stops`)
+      .then(r => setCoolStops(r.data))
+      .catch(() => {});
+  }, []);
 
   // Fetch heatmap for selected hour
   useEffect(() => {
-    axios.get(`http://localhost:5000/api/heatmap?hour=${selectedHour}`)
+    axios.get(`${API_BASE_URL}/api/heatmap?hour=${selectedHour}`)
       .then(r => setHeatPts(r.data))
       .catch(() => {
-        axios.get('http://localhost:5000/api/heatmap')
+        axios.get(`${API_BASE_URL}/api/heatmap`)
           .then(r => setHeatPts(r.data))
           .catch(() => {});
       });
@@ -327,7 +323,7 @@ axios.get(`${API_BASE_URL}/api/heatmap`)
 
     try {
       const modeParam = mode === 'walking' ? 'walk' : mode === 'cycling' ? 'bike' : 'drive';
-      const { data } = await axios.post('http://localhost:5000/api/route', {
+      const { data } = await axios.post(`${API_BASE_URL}/api/route`, {
         start: startCoords,
         end: destCoords,
         mode: modeParam,
@@ -342,7 +338,7 @@ axios.get(`${API_BASE_URL}/api/heatmap`)
         window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Backend routing error. Ensure Flask server is running.');
+      setError(err.response?.data?.error || 'Backend routing error. Ensure API server is running.');
     } finally {
       setLoading(false);
     }
@@ -469,7 +465,7 @@ axios.get(`${API_BASE_URL}/api/heatmap`)
               <h1>Cool Route Planner</h1>
               <span className="pro-pill">PRO HUD</span>
             </div>
-            <p className="brand-subtitle">FortyGuard Micro-Climate Routing & Urban Heat Defense</p>
+            <p className="brand-subtitle">Micro-Climate Routing & Urban Heat Defense</p>
           </div>
         </div>
 
@@ -861,154 +857,88 @@ axios.get(`${API_BASE_URL}/api/heatmap`)
                 <span className="chip-indicator" />
                 <div>
                   <strong>Las Vegas Thermal Corridor</strong>
-                  <span>AOI: 36.11°N, 115.17°W · FortyGuard AI Grid ({heatPts.length} sensors)</span>
+                  <span>AOI: 36.11°N, 115.17°W · AI Grid ({heatPts.length} sensors)</span>
                 </div>
               </div>
 
-              {/* Basemap Switcher */}
-              <div className="basemap-selector-pill">
-                <Layers size={14} className="layer-icon" />
-                {Object.entries(BASEMAPS).map(([key, bm]) => (
+              <div className="map-controls-row">
+                <div className="basemap-select-group">
+                  <Layers size={14} />
+                  {Object.entries(BASEMAPS).map(([key, bm]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`bm-btn ${basemapKey === key ? 'active' : ''}`}
+                      onClick={() => setBasemapKey(key)}
+                    >
+                      {bm.icon} {bm.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="toggle-group">
                   <button
-                    key={key}
                     type="button"
-                    className={`basemap-btn ${basemapKey === key ? 'active' : ''}`}
-                    onClick={() => setBasemapKey(key)}
-                    title={`Switch to ${bm.name}`}
+                    className={`toggle-btn ${showHeatmap ? 'active' : ''}`}
+                    onClick={() => setShowHeatmap(!showHeatmap)}
                   >
-                    <span>{bm.icon}</span>
-                    <span className="btn-label">{bm.name}</span>
+                    <Flame size={13} /> Thermal Layer
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    className={`toggle-btn ${showCoolingStops ? 'active' : ''}`}
+                    onClick={() => setShowCoolingStops(!showCoolingStops)}
+                  >
+                    <Snowflake size={13} /> Cooling Stops
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Layer Toggles Floating Island */}
-            <div className="map-floating-controls">
-              <button
-                type="button"
-                className={`float-toggle-btn ${showHeatmap ? 'active' : ''}`}
-                onClick={() => setShowHeatmap(!showHeatmap)}
-              >
-                🌡️ Heatmap {showHeatmap ? 'ON' : 'OFF'}
-              </button>
-              <button
-                type="button"
-                className={`float-toggle-btn ${showCoolingStops ? 'active' : ''}`}
-                onClick={() => setShowCoolingStops(!showCoolingStops)}
-              >
-                ❄️ Cooling Stops ({coolStops.length})
-              </button>
-            </div>
-
-            {/* Active Simulation HUD Overlay */}
-            {isNavigating && activeNavPosition && (
-              <div className="nav-active-hud animate-slide-down">
-                <div className="nav-hud-col">
-                  <span className="nav-hud-label">SIMULATED SPEED</span>
-                  <span className="nav-hud-value">
-                    {MODES.find(m => m.id === mode)?.speed} km/h
-                  </span>
-                </div>
-                <div className="nav-hud-divider" />
-                <div className="nav-hud-col">
-                  <span className="nav-hud-label">SEGMENT TEMP</span>
-                  <span className="nav-hud-value cool">
-                    {routeData?.cool_route?.avg_temp_c}°C
-                  </span>
-                </div>
-                <div className="nav-hud-divider" />
-                <div className="nav-hud-col">
-                  <span className="nav-hud-label">PROGRESS</span>
-                  <span className="nav-hud-value text-emerald">
-                    {Math.round((navIndex / Math.max(1, coolPath.length - 1)) * 100)}%
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Map Container */}
+            {/* Leaflet Map React Engine */}
             <MapContainer
               center={MAP_CENTER}
-              zoom={15}
-              style={{ height: '100%', width: '100%' }}
-              zoomControl={true}
+              zoom={14}
+              scrollWheelZoom={true}
+              className={`leaflet-map-canvas ${BASEMAPS[basemapKey].cssClass || ''}`}
             >
-              <MapViewController bounds={routeBounds} />
-              <MapClickHandler activePicking={activePicking} onLocationPicked={handleLocationPicked} />
-
-              {/* Clean Basemap Tiles (Zero Watermarks) */}
               <TileLayer
-                key={basemapKey}
-                attribution={BASEMAPS[basemapKey].attribution}
                 url={BASEMAPS[basemapKey].base}
+                attribution={BASEMAPS[basemapKey].attribution}
                 subdomains={BASEMAPS[basemapKey].subdomains || []}
-                maxZoom={BASEMAPS[basemapKey].maxZoom || 18}
-                className={BASEMAPS[basemapKey].cssClass || ''}
+                maxZoom={BASEMAPS[basemapKey].maxZoom}
               />
 
-              {/* Reference / Labels overlay for ESRI */}
               {BASEMAPS[basemapKey].ref && (
-                <TileLayer
-                  key={`${basemapKey}-ref`}
-                  url={BASEMAPS[basemapKey].ref}
-                  maxZoom={BASEMAPS[basemapKey].maxZoom || 18}
-                />
+                <TileLayer url={BASEMAPS[basemapKey].ref} maxZoom={BASEMAPS[basemapKey].maxZoom} />
               )}
 
-              {/* Thermal Heatmap Overlay */}
-              {showHeatmap && heatPts.length > 0 && (
-                <HeatmapLayer points={heatPts} intensity={1.0} />
-              )}
+              <MapClickHandler activePicking={activePicking} onLocationPicked={handleLocationPicked} />
+              <MapViewController bounds={routeBounds} />
 
-              {/* Cool Route — Vibrant Green Glow */}
-              {coolPath.length > 0 && (
-                <>
-                  <Polyline
-                    positions={coolPath}
-                    pathOptions={{
-                      color: '#059669',
-                      weight: 9,
-                      opacity: 0.4,
-                      lineCap: 'round',
-                      lineJoin: 'round',
-                    }}
-                  />
-                  <Polyline
-                    positions={coolPath}
-                    pathOptions={{
-                      color: '#10b981',
-                      weight: 5,
-                      opacity: 0.98,
-                      lineCap: 'round',
-                      lineJoin: 'round',
-                    }}
-                  />
-                </>
-              )}
+              {/* Heatmap Overlay */}
+              {showHeatmap && <HeatmapLayer points={heatPts} intensity={1.2} />}
 
-              {/* Hot Route — Dashed Amber/Red */}
-              {hotPath.length > 0 && (
-                <Polyline
-                  positions={hotPath}
-                  pathOptions={{
-                    color: '#ef4444',
-                    weight: 3.5,
-                    opacity: 0.75,
-                    dashArray: '8, 12',
-                    lineCap: 'round',
-                  }}
-                />
-              )}
+              {/* Cooling Oasis Markers */}
+              {showCoolingStops && coolStops.map((stop, idx) => (
+                <Marker key={idx} position={[stop.lat, stop.lon]} icon={CoolingIcon}>
+                  <Popup>
+                    <div className="popup-box">
+                      <h4>❄️ Shaded Cooling Oasis</h4>
+                      <p>Temp: <strong>{stop.temp_c?.toFixed(1)}°C</strong></p>
+                      <small>Resting zone equipped with misting & shade canopy.</small>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
 
-              {/* Start Marker */}
+              {/* Origin Marker */}
               {startCoords && (
                 <Marker position={[startCoords.lat, startCoords.lon]} icon={StartIcon}>
                   <Popup>
-                    <div className="popup-pro">
-                      <div className="popup-header">🟢 Origin</div>
-                      <div className="popup-title">{startName}</div>
-                      <div className="popup-coords">{startCoords.lat.toFixed(5)}, {startCoords.lon.toFixed(5)}</div>
+                    <div className="popup-box">
+                      <h4>🟢 Origin</h4>
+                      <p>{startName}</p>
                     </div>
                   </Popup>
                 </Marker>
@@ -1018,83 +948,47 @@ axios.get(`${API_BASE_URL}/api/heatmap`)
               {destCoords && (
                 <Marker position={[destCoords.lat, destCoords.lon]} icon={DestIcon}>
                   <Popup>
-                    <div className="popup-pro">
-                      <div className="popup-header">🏁 Destination</div>
-                      <div className="popup-title">{destName}</div>
-                      <div className="popup-coords">{destCoords.lat.toFixed(5)}, {destCoords.lon.toFixed(5)}</div>
+                    <div className="popup-box">
+                      <h4>🏁 Destination</h4>
+                      <p>{destName}</p>
                     </div>
                   </Popup>
                 </Marker>
               )}
 
-              {/* Active Simulated Position Marker */}
+              {/* Hot / Direct Path Polyline */}
+              {hotPath.length > 0 && (
+                <Polyline
+                  positions={hotPath}
+                  pathOptions={{
+                    color: '#ef4444',
+                    weight: 4,
+                    dashArray: '6, 8',
+                    opacity: 0.7,
+                  }}
+                />
+              )}
+
+              {/* Cool / Shaded Path Polyline */}
+              {coolPath.length > 0 && (
+                <Polyline
+                  positions={coolPath}
+                  pathOptions={{
+                    color: '#10b981',
+                    weight: 6,
+                    opacity: 0.95,
+                  }}
+                />
+              )}
+
+              {/* Live Navigation Marker */}
               {isNavigating && activeNavPosition && (
-                <Marker position={activeNavPosition} icon={SimNavIcon}>
-                  <Popup>
-                    <div className="popup-pro">
-                      <div className="popup-header">🧭 Live Simulation Active</div>
-                      <div className="popup-title">Advancing through cool corridor</div>
-                    </div>
-                  </Popup>
-                </Marker>
+                <Marker position={activeNavPosition} icon={SimNavIcon} />
               )}
-
-              {/* Cooling Stop Markers */}
-              {showCoolingStops && coolStops.map((stop, idx) => (
-                <Marker key={idx} position={[stop.lat, stop.lon]} icon={CoolingIcon}>
-                  <Popup>
-                    <div className="popup-pro">
-                      <div className="popup-header">❄️ Cooling Oasis #{idx + 1}</div>
-                      <div className="popup-temp">
-                        Ambient Temp: <strong>{stop.temp_c?.toFixed(1)}°C</strong>
-                      </div>
-                      <p className="popup-desc">Verified urban shade zone. Lower heat index oasis.</p>
-                      <button
-                        className="popup-cta-btn"
-                        onClick={() => {
-                          setDestCoords({ lat: stop.lat, lon: stop.lon });
-                          setDestName(`Cooling Stop #${idx + 1}`);
-                          handleCalculateRoute();
-                        }}
-                      >
-                        Route To This Oasis ➔
-                      </button>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
             </MapContainer>
-
-            {/* Map Legend */}
-            <div className="map-legend-pro">
-              <div className="legend-title">Route Telemetry</div>
-              {routeData && (
-                <>
-                  <div className="legend-row">
-                    <div className="legend-line cool-line" />
-                    <span>Coolest Path ({routeData.cool_route.avg_temp_c}°C)</span>
-                  </div>
-                  <div className="legend-row">
-                    <div className="legend-line hot-line" />
-                    <span>Fastest Path ({routeData.hot_route.avg_temp_c}°C)</span>
-                  </div>
-                </>
-              )}
-              <div className="legend-row">
-                <div className="legend-dot cool-dot" />
-                <span>❄️ Shaded Oasis</span>
-              </div>
-              <div className="legend-row">
-                <div className="heat-scale-bar" />
-                <div className="heat-scale-labels">
-                  <span>Cooler</span>
-                  <span>Extreme Heat</span>
-                </div>
-              </div>
-            </div>
-
           </div>
         </main>
+
       </div>
     </div>
   );
