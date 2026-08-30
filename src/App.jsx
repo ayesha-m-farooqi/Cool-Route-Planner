@@ -243,26 +243,31 @@ export default function App() {
   const simTimerRef = useRef(null);
 
   // Fetch initial data layers
-  useEffect(() => {
-    axios.get(`${API_BASE_URL}/api/heatmap/timeline`)
-      .then(r => setAvailableHours(r.data))
-      .catch(() => {});
+  useEffect(() => {
+    // Fetch available timeline hours
+  // Example 1: Timeline
+axios.get(`${API_BASE_URL}/api/heatmap/timeline`)
 
-    axios.get(`${API_BASE_URL}/api/cooling-stops`)
-      .then(r => setCoolStops(r.data))
-      .catch(() => {});
-  }, []);
+// Example 2: Cooling Stops
+axios.get(`${API_BASE_URL}/api/cooling-stops`)
 
-  // Fetch heatmap for selected hour
-  useEffect(() => {
-    axios.get(`${API_BASE_URL}/api/heatmap?hour=${selectedHour}`)
-      .then(r => setHeatPts(r.data))
-      .catch(() => {
-        axios.get(`${API_BASE_URL}/api/heatmap`)
-          .then(r => setHeatPts(r.data))
-          .catch(() => {});
-      });
-  }, [selectedHour]);
+// Example 3: Heatmap Query
+axios.get(`${API_BASE_URL}/api/heatmap?hour=${selectedHour}`)
+
+// Example 4: Fallback Heatmap
+axios.get(`${API_BASE_URL}/api/heatmap`)
+
+  // Fetch heatmap for selected hour
+  useEffect(() => {
+    axios.get(`http://localhost:5000/api/heatmap?hour=${selectedHour}`)
+      .then(r => setHeatPts(r.data))
+      .catch(() => {
+        axios.get('http://localhost:5000/api/heatmap')
+          .then(r => setHeatPts(r.data))
+          .catch(() => {});
+      });
+  }, [selectedHour]);
+
   // Timeline auto-playback
   useEffect(() => {
     let interval = null;
