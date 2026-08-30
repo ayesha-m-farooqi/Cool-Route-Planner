@@ -244,7 +244,7 @@ export default function App() {
   // Fetch initial data layers
   useEffect(() => {
     // Fetch available timeline hours
-    axios.get('http://localhost:5000/api/heatmap/timeline')
+    axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/heatmap/timeline`)
       .then(r => {
         if (r.data.hours) setAvailableHours(r.data.hours);
         if (r.data.default) setSelectedHour(r.data.default);
@@ -252,17 +252,17 @@ export default function App() {
       .catch(() => {});
 
     // Fetch cooling stops
-    axios.get('http://localhost:5000/api/cooling-stops')
+    axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/cooling-stops`)
       .then(r => setCoolStops(r.data))
       .catch(() => {});
   }, []);
 
   // Fetch heatmap for selected hour
   useEffect(() => {
-    axios.get(`http://localhost:5000/api/heatmap?hour=${selectedHour}`)
+    axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/heatmap?hour=${selectedHour}`)
       .then(r => setHeatPts(r.data))
       .catch(() => {
-        axios.get('http://localhost:5000/api/heatmap')
+        axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/heatmap`)
           .then(r => setHeatPts(r.data))
           .catch(() => {});
       });
@@ -327,7 +327,7 @@ export default function App() {
 
     try {
       const modeParam = mode === 'walking' ? 'walk' : mode === 'cycling' ? 'bike' : 'drive';
-      const { data } = await axios.post('http://localhost:5000/api/route', {
+      const { data } = await axios.post(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/route`, {
         start: startCoords,
         end: destCoords,
         mode: modeParam,
@@ -342,7 +342,7 @@ export default function App() {
         window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Backend routing error. Ensure Flask server is running.');
+      setError(err.response?.data?.error || 'Unable to generate route. Please check your locations or try again later.');
     } finally {
       setLoading(false);
     }

@@ -1,0 +1,25 @@
+services:
+  # Backend Web Service
+  - type: web
+    name: cool-route-planner-backend
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && gunicorn app:app
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: FORTYGUARD_API_KEY
+        sync: false
+
+  # Frontend Static Site
+  - type: web
+    name: cool-route-planner-frontend
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_BACKEND_URL
+        fromService:
+          type: web
+          name: cool-route-planner-backend
+          envVarKey: RENDER_EXTERNAL_URL
