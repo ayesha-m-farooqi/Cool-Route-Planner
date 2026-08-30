@@ -4,3 +4,4 @@ osmnx
 networkx
 shapely
 numpy
+scikit-learn

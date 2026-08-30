@@ -103,6 +103,77 @@ class TemperatureLookup:
         return float(self.center_temps[nearest_idx])
 
 
+class PointTemperatureLookup:
+    """
+    Lightweight nearest-neighbor lookup over a flat list of
+    {'lat':.., 'lon':.., 'temp_c':..} points - used for multi_hour_data.json,
+    which has raw points rather than GeoJSON polygon tiles.
+    """
+
+    def __init__(self, points):
+        self.centers = np.array([(p["lat"], p["lon"]) for p in points])
+        self.temps = np.array([p["temp_c"] for p in points])
+
+    def temp_at(self, lat: float, lon: float) -> float:
+        d2 = (self.centers[:, 0] - lat) ** 2 + (self.centers[:, 1] - lon) ** 2
+        idx = int(np.argmin(d2))
+        return float(self.temps[idx])
+
+
+class MultiHourTemperatureData:
+    """
+    Wraps multi_hour_data.json - a dict of {"HH:MM": [points...]}.
+
+    Lets you ask "what's the temperature at this location at 3pm" even
+    though FortyGuard was only queried at a handful of sampled hours
+    (e.g. 8:00, 11:00, 14:00, 17:00). Does this by linearly interpolating
+    between the two nearest sampled time slots, per-location, rather than
+    just rounding to the closest sample - a rough but honest estimate for
+    times in between real data points.
+    """
+
+    def __init__(self, path: str):
+        with open(path, "r") as f:
+            raw = json.load(f)
+
+        self.slots = {time_str: PointTemperatureLookup(points) for time_str, points in raw.items()}
+        self.sorted_times = sorted(self.slots.keys(), key=self._to_minutes)
+
+        if len(self.sorted_times) < 2:
+            raise ValueError("multi_hour_data.json needs at least 2 time slots to interpolate")
+
+    @staticmethod
+    def _to_minutes(time_str: str) -> int:
+        h, m = map(int, time_str.split(":"))
+        return h * 60 + m
+
+    def temp_at(self, lat: float, lon: float, time_str: str) -> float:
+        """
+        Returns an interpolated temperature at (lat, lon) for an arbitrary
+        "HH:MM" time. If the requested time is outside the sampled range
+        (e.g. asking about 2am when data only spans 8am-5pm), clamps to
+        the nearest boundary slot rather than extrapolating wildly.
+        """
+        target_min = self._to_minutes(time_str)
+        times_min = [self._to_minutes(t) for t in self.sorted_times]
+
+        if target_min <= times_min[0]:
+            return self.slots[self.sorted_times[0]].temp_at(lat, lon)
+        if target_min >= times_min[-1]:
+            return self.slots[self.sorted_times[-1]].temp_at(lat, lon)
+
+        for i in range(len(times_min) - 1):
+            t0, t1 = times_min[i], times_min[i + 1]
+            if t0 <= target_min <= t1:
+                temp0 = self.slots[self.sorted_times[i]].temp_at(lat, lon)
+                temp1 = self.slots[self.sorted_times[i + 1]].temp_at(lat, lon)
+                frac = (target_min - t0) / (t1 - t0) if t1 != t0 else 0.0
+                return temp0 + frac * (temp1 - temp0)
+
+        # Should be unreachable given the boundary checks above.
+        return self.slots[self.sorted_times[-1]].temp_at(lat, lon)
+
+
 # ---------------------------------------------------------------------------
 # 2. Build / load the street graph and attach temperature to every edge
 # ---------------------------------------------------------------------------
@@ -351,6 +422,76 @@ def get_hot_and_cool_routes(G, orig_node, dest_node, alpha=3.0, mode="walk"):
     }
 
 
+def route_avg_temp_at_time(G, route, multi_hour_data: MultiHourTemperatureData, time_str: str):
+    """
+    Computes the distance-weighted average temperature along an existing
+    route (list of node ids in G) AT A SPECIFIC TIME, using interpolated
+    multi-hour data instead of the single-snapshot vegas_heatmap.geojson.
+
+    Returns (avg_temp_c, distance_m).
+    """
+    total_dist = 0.0
+    weighted_sum = 0.0
+    for i in range(len(route) - 1):
+        u, v = route[i], route[i + 1]
+        edge_data = G[u][v][0]
+        length = edge_data.get("length", 0)
+        u_lat, u_lon = G.nodes[u]["y"], G.nodes[u]["x"]
+        v_lat, v_lon = G.nodes[v]["y"], G.nodes[v]["x"]
+        mid_lat, mid_lon = (u_lat + v_lat) / 2, (u_lon + v_lon) / 2
+        temp = multi_hour_data.temp_at(mid_lat, mid_lon, time_str)
+        weighted_sum += temp * length
+        total_dist += length
+
+    avg_temp = weighted_sum / total_dist if total_dist > 0 else None
+    return avg_temp, total_dist
+
+
+def recommend_departure_time(G, route, multi_hour_data: MultiHourTemperatureData,
+                              mode="walk", candidate_times=None):
+    """
+    Evaluates the SAME route at several candidate departure times and
+    ranks them by heat exposure (avg_temp * duration), so the app can
+    answer "what's the best time to leave for this trip" rather than
+    only "which street should I take".
+
+    candidate_times: list of "HH:MM" strings to check. Defaults to the
+    exact sampled slots in multi_hour_data (e.g. 08:00/11:00/14:00/17:00).
+    Pass your own list (e.g. every hour) to interpolate finer-grained options.
+    """
+    if mode not in MODE_SPEEDS_KMH:
+        raise ValueError(f"mode must be one of {list(MODE_SPEEDS_KMH)}, got {mode!r}")
+    speed_kmh = MODE_SPEEDS_KMH[mode]
+
+    if candidate_times is None:
+        candidate_times = multi_hour_data.sorted_times
+
+    options = []
+    for t in candidate_times:
+        avg_temp, dist = route_avg_temp_at_time(G, route, multi_hour_data, t)
+        duration_min = round((dist / 1000.0) / speed_kmh * 60.0, 1)
+        heat_exposure_index = round(avg_temp * duration_min, 1) if avg_temp is not None else None
+        options.append({
+            "time": t,
+            "avg_temp_c": round(avg_temp, 2) if avg_temp is not None else None,
+            "duration_min": duration_min,
+            "heat_exposure_index": heat_exposure_index,
+        })
+
+    ranked = sorted(
+        options,
+        key=lambda o: o["heat_exposure_index"] if o["heat_exposure_index"] is not None else float("inf"),
+    )
+
+    return {
+        "mode": mode,
+        "distance_m": round(options[0]["duration_min"] * speed_kmh * 1000 / 60, 1) if options else None,
+        "options": options,
+        "best_time": ranked[0] if ranked else None,
+        "worst_time": ranked[-1] if ranked else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 5. Demo / test harness
 # ---------------------------------------------------------------------------
@@ -358,11 +499,11 @@ def get_hot_and_cool_routes(G, orig_node, dest_node, alpha=3.0, mode="walk"):
 if __name__ == "__main__":
     # Same bounding box used in fortyguard_pipeline.py
     VEGAS_AOI = [
-        [-115.2000, 36.0950],
-        [-115.1400, 36.0950],
-        [-115.1400, 36.1800],
-        [-115.2000, 36.1800],
-        [-115.2000, 36.0950],
+        [-115.1750, 36.1100],
+        [-115.1650, 36.1100],
+        [-115.1650, 36.1250],
+        [-115.1750, 36.1250],
+        [-115.1750, 36.1100],
     ]
 
     temp_lookup = TemperatureLookup("vegas_heatmap.geojson")
@@ -378,6 +519,19 @@ if __name__ == "__main__":
     print("Heat score for first 10 tiles:", calculate_route_heat_score(sample_points))
 
     # Full route comparison (requires internet access for OSM download)
+    # Multi-hour / best-departure-time demo (works offline, no OSM needed
+    # for the interpolation logic itself - only for the route distances).
+    try:
+        multi_hour = MultiHourTemperatureData("multi_hour_data.json")
+        print("\nMulti-hour data loaded. Sampled times:", multi_hour.sorted_times)
+        sample_lat, sample_lon = 36.1170, -115.1730
+        for t in ["08:00", "09:30", "11:00", "13:00", "14:00", "16:00", "17:00"]:
+            temp = multi_hour.temp_at(sample_lat, sample_lon, t)
+            marker = "(sampled)" if t in multi_hour.sorted_times else "(interpolated)"
+            print(f"  {t} {marker}: {temp:.2f}C")
+    except FileNotFoundError:
+        print("[RoutingEngine] multi_hour_data.json not found - skipping time-of-day demo.")
+
     if OSMNX_AVAILABLE:
         try:
             # Change this to "walk", "bike", or "drive" depending on the
@@ -401,6 +555,19 @@ if __name__ == "__main__":
 
             result = get_hot_and_cool_routes(G, orig, dest, alpha=5.0, mode=MODE)
             print(json.dumps(result, indent=2))
+
+            # Now answer the more useful question for this pitch: given THIS
+            # route, what's the best time of day to make the trip?
+            try:
+                multi_hour = MultiHourTemperatureData("multi_hour_data.json")
+                hot_route_nodes = nx.shortest_path(G, orig, dest, weight="length")
+                departure_advice = recommend_departure_time(
+                    G, hot_route_nodes, multi_hour, mode=MODE
+                )
+                print("\n=== Best time to leave for this route ===")
+                print(json.dumps(departure_advice, indent=2))
+            except FileNotFoundError:
+                print("[RoutingEngine] multi_hour_data.json not found - skipping departure-time demo.")
         except Exception as e:
             print(f"[RoutingEngine] Could not build live street graph: {e}")
             print("[RoutingEngine] (Needs internet access to OSM/Overpass servers.)")
