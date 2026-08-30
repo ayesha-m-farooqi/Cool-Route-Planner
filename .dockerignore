@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+cache
+backend/cache
+backend/__pycache__
+**/__pycache__
+**/*.pyc
+venv
+.env
+.env.local
+.vscode
+.idea

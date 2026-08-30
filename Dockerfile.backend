@@ -1,0 +1,35 @@
+# Cool Route Planner — backend (Flask + osmnx routing engine)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=5772
+
+# build-essential: some numpy/scikit-learn transitive deps still build from
+# sdist on certain arches even though geopandas/fiona ship manylinux wheels.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ .
+
+# osmnx's on-disk query cache — keep it in a volume so re-deploys don't
+# re-download the street graph from the Overpass API every time.
+RUN mkdir -p /app/cache
+
+EXPOSE 5772
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
+  CMD curl -f http://localhost:5772/ || exit 1
+
+# Single worker: the routing graph is built once per-process into an
+# in-memory dict (see app.py get_graph()); extra workers would each
+# rebuild/hold their own copy. --threads gives request concurrency instead.
+CMD ["gunicorn", "--bind", "0.0.0.0:5772", "--workers", "1", "--threads", "4", \
+     "--timeout", "300", "app:app"]

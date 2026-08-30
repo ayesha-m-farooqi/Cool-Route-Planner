@@ -135,6 +135,14 @@ const BASEMAPS = {
 };
 
 // ── Map Events for interactive pin placement & re-centering ──
+// Backend URL: empty by default — requests go to relative "/api/..." on
+// the same origin the page was served from, and nginx (see nginx.conf)
+// proxies that to the backend container. No host/port baked into the
+// bundle, so it works on any server unmodified. Set VITE_BACKEND_URL at
+// build time only if the backend is NOT behind this frontend's proxy
+// (e.g. a separate domain).
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+
 function MapClickHandler({ activePicking, onLocationPicked }) {
   useMapEvents({
     click(e) {
@@ -244,7 +252,7 @@ export default function App() {
   // Fetch initial data layers
   useEffect(() => {
     // Fetch available timeline hours
-    axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/heatmap/timeline`)
+    axios.get(`${BACKEND_URL}/api/heatmap/timeline`)
       .then(r => {
         if (r.data.hours) setAvailableHours(r.data.hours);
         if (r.data.default) setSelectedHour(r.data.default);
@@ -252,17 +260,17 @@ export default function App() {
       .catch(() => {});
 
     // Fetch cooling stops
-    axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/cooling-stops`)
+    axios.get(`${BACKEND_URL}/api/cooling-stops`)
       .then(r => setCoolStops(r.data))
       .catch(() => {});
   }, []);
 
   // Fetch heatmap for selected hour
   useEffect(() => {
-    axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/heatmap?hour=${selectedHour}`)
+    axios.get(`${BACKEND_URL}/api/heatmap?hour=${selectedHour}`)
       .then(r => setHeatPts(r.data))
       .catch(() => {
-        axios.get(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/heatmap`)
+        axios.get(`${BACKEND_URL}/api/heatmap`)
           .then(r => setHeatPts(r.data))
           .catch(() => {});
       });
@@ -327,7 +335,7 @@ export default function App() {
 
     try {
       const modeParam = mode === 'walking' ? 'walk' : mode === 'cycling' ? 'bike' : 'drive';
-      const { data } = await axios.post(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/route`, {
+      const { data } = await axios.post(`${BACKEND_URL}/api/route`, {
         start: startCoords,
         end: destCoords,
         mode: modeParam,

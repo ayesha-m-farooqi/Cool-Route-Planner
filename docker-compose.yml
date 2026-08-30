@@ -1,0 +1,30 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: cool-route-backend
+    restart: unless-stopped
+    ports:
+      - "5772:5772"
+    environment:
+      PORT: 5772
+      FORTYGUARD_API_KEY: ${FORTYGUARD_API_KEY:-}
+    volumes:
+      - backend_cache:/app/cache
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-}
+    container_name: cool-route-frontend
+    restart: unless-stopped
+    ports:
+      - "5782:5782"
+    depends_on:
+      - backend
+
+volumes:
+  backend_cache:
