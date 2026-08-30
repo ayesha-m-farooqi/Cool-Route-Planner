@@ -1,250 +1,610 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet.heat';
 import {
-  MapPin,
-  Navigation,
-  Thermometer,
-  Clock,
-  Activity,
+  Compass,
   TreePine,
   Flame,
   Wind,
   Snowflake,
   Zap,
   AlertTriangle,
+  Play,
+  Pause,
+  RotateCcw,
+  Volume2,
+  VolumeX,
+  Layers,
+  Download,
+  Share2,
+  Sun,
+  Droplets,
+  ShieldCheck,
+  ArrowRight,
+  Crosshair,
+  Sliders,
+  Check,
+  Footprints,
+  Bike,
+  Truck,
+  Sparkles,
+  RefreshCw,
+  Activity,
 } from 'lucide-react';
 import L from 'leaflet';
 
-// ── Fix Leaflet's broken default icon paths under bundlers ──
-import markerIconUrl    from 'leaflet/dist/images/marker-icon.png';
-import markerShadowUrl  from 'leaflet/dist/images/marker-shadow.png';
-import markerIcon2xUrl  from 'leaflet/dist/images/marker-icon-2x.png';
+// ── Fix Leaflet default marker icons ──
+import markerIconUrl from 'leaflet/dist/images/marker-icon.png';
+import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png';
+import markerIcon2xUrl from 'leaflet/dist/images/marker-icon-2x.png';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconUrl:       markerIconUrl,
-  shadowUrl:     markerShadowUrl,
+  iconUrl: markerIconUrl,
+  shadowUrl: markerShadowUrl,
   iconRetinaUrl: markerIcon2xUrl,
-  iconSize:    [20, 33],
-  iconAnchor:  [10, 33],
-  popupAnchor: [1, -30],
-  shadowSize:  [33, 33],
+  iconSize: [22, 36],
+  iconAnchor: [11, 36],
+  popupAnchor: [1, -32],
+  shadowSize: [36, 36],
 });
 
-// ── Cooling Stop icon ──
-const CoolingIcon = L.divIcon({
-  html: `<div style="
-    background: rgba(37,99,235,0.92);
-    border: 2px solid #93c5fd;
-    border-radius: 50%;
-    width: 30px; height: 30px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 15px;
-    box-shadow: 0 0 12px rgba(59,130,246,0.7), 0 2px 6px rgba(0,0,0,0.5);
-  ">❄️</div>`,
+// ── Custom Div Icons ──
+const StartIcon = L.divIcon({
+  html: `<div class="custom-pin start-pin"><div class="pin-inner">🟢</div></div>`,
   className: '',
-  iconSize:    [30, 30],
-  iconAnchor:  [15, 15],
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+  popupAnchor: [0, -32],
+});
+
+const DestIcon = L.divIcon({
+  html: `<div class="custom-pin dest-pin"><div class="pin-inner">🏁</div></div>`,
+  className: '',
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+  popupAnchor: [0, -32],
+});
+
+const SimNavIcon = L.divIcon({
+  html: `<div class="sim-nav-marker"><div class="nav-pulse"></div><div class="nav-arrow">🧭</div></div>`,
+  className: '',
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
   popupAnchor: [0, -18],
 });
 
-// ── Thermal heatmap layer via leaflet.heat ──
-function HeatmapLayer({ points }) {
-  const map     = useMap();
+const CoolingIcon = L.divIcon({
+  html: `<div class="cooling-oasis-marker">❄️</div>`,
+  className: '',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+  popupAnchor: [0, -18],
+});
+
+// ── Preset POIs in the Vegas Corridor ──
+const PRESET_POIS = [
+  { name: 'Area15 (Omega Mart)', lat: 36.1215, lon: -115.1776, desc: 'Immersive Art & Tech District' },
+  { name: 'Caesars Palace', lat: 36.1162, lon: -115.1745, desc: 'Central Strip Resort' },
+  { name: 'Bellagio Fountains', lat: 36.1126, lon: -115.1767, desc: 'Iconic Lake & Promenade' },
+  { name: 'The LINQ Promenade', lat: 36.1180, lon: -115.1690, desc: 'Shaded Pedestrian Dining' },
+  { name: 'High Roller Wheel', lat: 36.1175, lon: -115.1681, desc: 'Observation District' },
+  { name: 'Flamingo Las Vegas', lat: 36.1164, lon: -115.1706, desc: 'Wildlife Habitat & Garden' },
+  { name: 'The Mirage / Hard Rock', lat: 36.1211, lon: -115.1740, desc: 'North Strip Hub' },
+  { name: 'Paris Las Vegas', lat: 36.1125, lon: -115.1707, desc: 'Eiffel Tower Deck' },
+  { name: 'Horseshoe Las Vegas', lat: 36.1147, lon: -115.1700, desc: 'East Strip Walkway' },
+];
+
+// ── 100% Free, Premium Basemap Layers (Zero Watermarks) ──
+const BASEMAPS = {
+  dark: {
+    name: 'Dark Canvas',
+    icon: '🌙',
+    base: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    ref: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, HERE, Garmin, OpenStreetMap contributors',
+    maxZoom: 16,
+  },
+  satellite: {
+    name: 'Satellite Hybrid',
+    icon: '🛰️',
+    base: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    ref: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, Maxar, Earthstar Geographics',
+    maxZoom: 18,
+  },
+  street: {
+    name: 'Clean Streets',
+    icon: '🗺️',
+    base: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    subdomains: ['a', 'b', 'c'],
+    maxZoom: 19,
+  },
+  cyber: {
+    name: 'Cyberpunk Matrix',
+    icon: '🌆',
+    base: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap contributors',
+    subdomains: ['a', 'b', 'c'],
+    cssClass: 'cyberpunk-tiles',
+    maxZoom: 19,
+  },
+};
+
+// ── Map Events for interactive pin placement & re-centering ──
+function MapClickHandler({ activePicking, onLocationPicked }) {
+  useMapEvents({
+    click(e) {
+      if (activePicking) {
+        onLocationPicked(activePicking, e.latlng.lat, e.latlng.lng);
+      }
+    },
+  });
+  return null;
+}
+
+function MapViewController({ bounds }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds && bounds.length > 1) {
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+    }
+  }, [bounds, map]);
+  return null;
+}
+
+// ── Thermal Heatmap Layer ──
+function HeatmapLayer({ points, intensity = 1.0 }) {
+  const map = useMap();
   const heatRef = useRef(null);
 
   useEffect(() => {
     if (!points || points.length === 0) return;
 
     const temps = points.map(p => p.temp);
-    const minT  = Math.min(...temps);
-    const maxT  = Math.max(...temps);
-    const span  = maxT - minT || 1;
+    const minT = Math.min(...temps);
+    const maxT = Math.max(...temps);
+    const span = maxT - minT || 1;
 
-    const data = points.map(p => [p.lat, p.lon, (p.temp - minT) / span]);
+    const data = points.map(p => [p.lat, p.lon, ((p.temp - minT) / span) * intensity]);
 
-    if (heatRef.current) { map.removeLayer(heatRef.current); }
+    if (heatRef.current) {
+      map.removeLayer(heatRef.current);
+    }
 
     heatRef.current = L.heatLayer(data, {
-      radius:  28,
-      blur:    22,
+      radius: 30,
+      blur: 24,
       maxZoom: 18,
       gradient: {
-        0.00: '#1e3a5f',
-        0.25: '#2563eb',
-        0.50: '#facc15',
-        0.75: '#ea580c',
-        1.00: '#991b1b',
+        0.00: '#1e3a8a',
+        0.20: '#0284c7',
+        0.45: '#10b981',
+        0.65: '#facc15',
+        0.85: '#f97316',
+        1.00: '#dc2626',
       },
     }).addTo(map);
 
-    return () => { if (heatRef.current) map.removeLayer(heatRef.current); };
-  }, [points, map]);
+    return () => {
+      if (heatRef.current) map.removeLayer(heatRef.current);
+    };
+  }, [points, intensity, map]);
 
   return null;
 }
 
-// ── Map Legend ──
-function MapLegend({ hasRoutes }) {
-  return (
-    <div className="map-legend">
-      <div className="map-legend-title">Legend</div>
-      {hasRoutes && (
-        <>
-          <div className="legend-row">
-            <div className="legend-line" style={{ background: '#10b981', height: 4 }} />
-            <span>Coolest Route</span>
-          </div>
-          <div className="legend-row">
-            <div className="legend-line" style={{ background: '#ef4444', height: 3, opacity: 0.8 }} />
-            <span>Fastest Route</span>
-          </div>
-        </>
-      )}
-      <div className="legend-row">
-        <div className="legend-dot" style={{ background: 'rgba(37,99,235,0.9)', borderColor: '#93c5fd' }} />
-        <span>❄️ Cooling Stop</span>
-      </div>
-      <div className="legend-row">
-        <div className="legend-gradient" />
-        <span>Heat Intensity</span>
-      </div>
-    </div>
-  );
-}
-
-// ── Stat card helper ──
-function Stat({ icon: Icon, label, value, color }) {
-  return (
-    <div className="stat-item">
-      <Icon className="stat-icon" size={14} color={color || undefined} />
-      <div className="stat-content">
-        <span className="stat-label">{label}</span>
-        <span className="stat-value">{value}</span>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════
 const MODES = [
-  { id: 'walking',  label: 'Walking',  emoji: '🚶' },
-  { id: 'cycling',  label: 'Cycling',  emoji: '🚲' },
-  { id: 'delivery', label: 'Delivery', emoji: '📦' },
+  { id: 'walking', label: 'Walking', emoji: '🚶', speed: 4.5, icon: Footprints },
+  { id: 'cycling', label: 'Cycling', emoji: '🚲', speed: 15.0, icon: Bike },
+  { id: 'delivery', label: 'EV / Delivery', emoji: '📦', speed: 25.0, icon: Truck },
 ];
 
-const MAP_CENTER = [36.1118, -115.176];
+const MAP_CENTER = [36.1170, -115.1710];
 
 export default function App() {
-  const [start,       setStart]       = useState('Area15');
-  const [destination, setDestination] = useState('Omega Mart');
-  const [mode,        setMode]        = useState('walking');
-  const [loading,     setLoading]     = useState(false);
-  const [routeData,   setRouteData]   = useState(null);
-  const [error,       setError]       = useState(null);
+  // Navigation & Coordinate State
+  const [startName, setStartName] = useState('Area15 (Omega Mart)');
+  const [startCoords, setStartCoords] = useState({ lat: 36.1215, lon: -115.1776 });
 
-  // Async data layers
-  const [heatPts,  setHeatPts]  = useState([]);
+  const [destName, setDestName] = useState('Bellagio Fountains');
+  const [destCoords, setDestCoords] = useState({ lat: 36.1126, lon: -115.1767 });
+
+  const [mode, setMode] = useState('walking');
+  const [heatTolerance, setHeatTolerance] = useState(5.0); // alpha
+  const [activePicking, setActivePicking] = useState(null); // 'start' | 'dest' | null
+
+  // Basemap & Visual Layers
+  const [basemapKey, setBasemapKey] = useState('dark');
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [showCoolingStops, setShowCoolingStops] = useState(true);
+
+  // Multi-Hour Heat Timeline
+  const [availableHours, setAvailableHours] = useState(['08:00', '11:00', '14:00', '17:00']);
+  const [selectedHour, setSelectedHour] = useState('14:00');
+  const [isPlayingTimeline, setIsPlayingTimeline] = useState(false);
+
+  // Data & Results
+  const [heatPts, setHeatPts] = useState([]);
   const [coolStops, setCoolStops] = useState([]);
-  const [layerStatus, setLayerStatus] = useState({ heat: 'loading', stops: 'loading' });
+  const [loading, setLoading] = useState(false);
+  const [routeData, setRouteData] = useState(null);
+  const [error, setError] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
+  // Live Simulated Navigation State
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [navIndex, setNavIndex] = useState(0);
+  const [navVoice, setNavVoice] = useState(true);
+  const simTimerRef = useRef(null);
+
+  // Fetch initial data layers
   useEffect(() => {
-    axios.get('http://localhost:5000/api/heatmap')
-      .then(r => { setHeatPts(r.data); setLayerStatus(s => ({ ...s, heat: 'active' })); })
-      .catch(() => setLayerStatus(s => ({ ...s, heat: 'idle' })));
+    // Fetch available timeline hours
+    axios.get('http://localhost:5000/api/heatmap/timeline')
+      .then(r => {
+        if (r.data.hours) setAvailableHours(r.data.hours);
+        if (r.data.default) setSelectedHour(r.data.default);
+      })
+      .catch(() => {});
 
+    // Fetch cooling stops
     axios.get('http://localhost:5000/api/cooling-stops')
-      .then(r => { setCoolStops(r.data); setLayerStatus(s => ({ ...s, stops: 'active' })); })
-      .catch(() => setLayerStatus(s => ({ ...s, stops: 'idle' })));
+      .then(r => setCoolStops(r.data))
+      .catch(() => {});
   }, []);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
+  // Fetch heatmap for selected hour
+  useEffect(() => {
+    axios.get(`http://localhost:5000/api/heatmap?hour=${selectedHour}`)
+      .then(r => setHeatPts(r.data))
+      .catch(() => {
+        axios.get('http://localhost:5000/api/heatmap')
+          .then(r => setHeatPts(r.data))
+          .catch(() => {});
+      });
+  }, [selectedHour]);
+
+  // Timeline auto-playback
+  useEffect(() => {
+    let interval = null;
+    if (isPlayingTimeline) {
+      interval = setInterval(() => {
+        setSelectedHour(curr => {
+          const idx = availableHours.indexOf(curr);
+          const nextIdx = (idx + 1) % availableHours.length;
+          return availableHours[nextIdx];
+        });
+      }, 2500);
+    }
+    return () => clearInterval(interval);
+  }, [isPlayingTimeline, availableHours]);
+
+  // Handle POI selection
+  const handleSelectPreset = (type, poi) => {
+    if (type === 'start') {
+      setStartName(poi.name);
+      setStartCoords({ lat: poi.lat, lon: poi.lon });
+    } else {
+      setDestName(poi.name);
+      setDestCoords({ lat: poi.lat, lon: poi.lon });
+    }
+  };
+
+  // Swap start and destination
+  const handleSwap = () => {
+    const tempName = startName;
+    const tempCoords = startCoords;
+    setStartName(destName);
+    setStartCoords(destCoords);
+    setDestName(tempName);
+    setDestCoords(tempCoords);
+  };
+
+  // Map click coordinate picker
+  const handleLocationPicked = (type, lat, lon) => {
+    const formatted = `Pin (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    if (type === 'start') {
+      setStartName(formatted);
+      setStartCoords({ lat, lon });
+    } else {
+      setDestName(formatted);
+      setDestCoords({ lat, lon });
+    }
+    setActivePicking(null);
+  };
+
+  // Calculate Route
+  const handleCalculateRoute = async (e) => {
+    if (e) e.preventDefault();
     setLoading(true);
     setError(null);
-    setRouteData(null);
+    setIsNavigating(false);
+    setNavIndex(0);
 
     try {
+      const modeParam = mode === 'walking' ? 'walk' : mode === 'cycling' ? 'bike' : 'drive';
       const { data } = await axios.post('http://localhost:5000/api/route', {
-        start: { lat: 36.1087, lon: -115.1777 },
-        end:   { lat: 36.1150, lon: -115.1742 },
-        mode:  mode === 'walking' ? 'walk' : mode === 'cycling' ? 'bike' : 'drive',
+        start: startCoords,
+        end: destCoords,
+        mode: modeParam,
+        alpha: heatTolerance,
       });
+
       setRouteData(data);
+
+      if (navVoice && 'speechSynthesis' in window) {
+        const text = `Route computed. Cool corridor reduces heat exposure by ${Math.abs(data.exposure_reduction_pct)} percent.`;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      }
     } catch (err) {
-      setError(err.response?.data?.error || 'Backend unreachable. Is the Flask server running on port 5000?');
+      setError(err.response?.data?.error || 'Backend routing error. Ensure Flask server is running.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Coordinate order: backend sends [lon, lat] → Leaflet needs [lat, lon]
-  const hotPath  = routeData?.hot_route?.coordinates?.map(c => [c[1], c[0]])  || [];
-  const coolPath = routeData?.cool_route?.coordinates?.map(c => [c[1], c[0]]) || [];
+  // Coordinates: backend sends [lon, lat] -> Leaflet wants [lat, lon]
+  const coolPath = useMemo(() => {
+    return routeData?.cool_route?.coordinates?.map(c => [c[1], c[0]]) || [];
+  }, [routeData]);
+
+  const hotPath = useMemo(() => {
+    return routeData?.hot_route?.coordinates?.map(c => [c[1], c[0]]) || [];
+  }, [routeData]);
+
+  // Route bounds for auto-zoom
+  const routeBounds = useMemo(() => {
+    if (coolPath.length === 0) return null;
+    return coolPath;
+  }, [coolPath]);
+
+  // Simulated Navigation Loop
+  useEffect(() => {
+    if (isNavigating && coolPath.length > 0) {
+      simTimerRef.current = setInterval(() => {
+        setNavIndex(prev => {
+          if (prev >= coolPath.length - 1) {
+            setIsNavigating(false);
+            if (navVoice && 'speechSynthesis' in window) {
+              window.speechSynthesis.speak(new SpeechSynthesisUtterance("You have safely arrived at your destination."));
+            }
+            return prev;
+          }
+          const next = prev + 1;
+
+          if (navVoice && next % 3 === 0 && 'speechSynthesis' in window) {
+            const pct = Math.round((next / (coolPath.length - 1)) * 100);
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance(`${pct} percent complete. Remaining in shaded path.`));
+          }
+
+          return next;
+        });
+      }, 1000);
+    } else {
+      clearInterval(simTimerRef.current);
+    }
+    return () => clearInterval(simTimerRef.current);
+  }, [isNavigating, coolPath, navVoice]);
+
+  // GPX Export Builder
+  const handleExportGPX = () => {
+    if (coolPath.length === 0) return;
+    const gpxContent = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="CoolRoutePlanner" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Cool Route - ${startName} to ${destName}</name>
+    <desc>Heat-optimized pedestrian/cyclist navigation path</desc>
+    <time>${new Date().toISOString()}</time>
+  </metadata>
+  <trk>
+    <name>Coolest Path (Avg Temp: ${routeData.cool_route.avg_temp_c}°C)</name>
+    <trkseg>
+      ${coolPath.map(pt => `<trkpt lat="${pt[0]}" lon="${pt[1]}"><time>${new Date().toISOString()}</time></trkpt>`).join('\n      ')}
+    </trkseg>
+  </trk>
+</gpx>`;
+
+    const blob = new Blob([gpxContent], { type: 'application/gpx+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cool_route_${Date.now()}.gpx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Share link
+  const handleShare = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  // Heat Stress & Biometrics calculations
+  const healthStats = useMemo(() => {
+    if (!routeData) return null;
+    const cool = routeData.cool_route;
+    const durationHrs = (cool.duration_min || 1) / 60;
+    const temp = cool.avg_temp_c || 35;
+
+    const sweatRateMl = Math.round((500 + Math.max(0, temp - 25) * 45) * durationHrs);
+    const calPerMin = mode === 'walking' ? 4.5 : mode === 'cycling' ? 7.5 : 2.0;
+    const calories = Math.round(calPerMin * cool.duration_min);
+
+    let riskLevel = 'Low';
+    let riskColor = '#10b981';
+    if (temp > 40) {
+      riskLevel = 'Extreme';
+      riskColor = '#ef4444';
+    } else if (temp > 35) {
+      riskLevel = 'High';
+      riskColor = '#f97316';
+    } else if (temp > 30) {
+      riskLevel = 'Moderate';
+      riskColor = '#facc15';
+    }
+
+    return { sweatRateMl, calories, riskLevel, riskColor, temp };
+  }, [routeData, mode]);
+
+  const activeNavPosition = coolPath[navIndex] || coolPath[0] || null;
 
   return (
     <div className="app-wrapper">
       {/* ══ HEADER ══════════════════════════════════════════════ */}
       <header className="app-header">
         <div className="app-header-brand">
-          <Wind size={26} color="#60a5fa" />
-          <h1>Cool Route Planner</h1>
+          <div className="brand-logo-glow">
+            <Wind size={24} color="#38bdf8" />
+          </div>
+          <div>
+            <div className="brand-title-wrap">
+              <h1>Cool Route Planner</h1>
+              <span className="pro-pill">PRO HUD</span>
+            </div>
+            <p className="brand-subtitle">FortyGuard Micro-Climate Routing & Urban Heat Defense</p>
+          </div>
         </div>
-        <div className="header-badges">
-          <span className="header-badge hackathon">FortyGuard Hackathon</span>
-          <span className="header-badge live">
-            <span className="live-dot" />
-            Live Data
-          </span>
+
+        <div className="header-actions">
+          {/* Time Slider Chip */}
+          <div className="timeline-header-widget">
+            <span className="widget-label">Thermal Time:</span>
+            <div className="time-chips">
+              {availableHours.map(h => (
+                <button
+                  key={h}
+                  type="button"
+                  className={`time-chip-btn ${selectedHour === h ? 'active' : ''}`}
+                  onClick={() => setSelectedHour(h)}
+                >
+                  {h}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`timeline-play-btn ${isPlayingTimeline ? 'playing' : ''}`}
+                onClick={() => setIsPlayingTimeline(!isPlayingTimeline)}
+                title={isPlayingTimeline ? 'Pause Timeline' : 'Auto Play Heat Evolution'}
+              >
+                {isPlayingTimeline ? <Pause size={12} /> : <Play size={12} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="header-badges">
+            <button className="icon-header-btn" onClick={handleShare} title="Share Route">
+              {copiedLink ? <Check size={16} color="#34d399" /> : <Share2 size={16} />}
+            </button>
+            <span className="header-badge live">
+              <span className="live-dot" />
+              Live Telemetry
+            </span>
+          </div>
         </div>
       </header>
 
       {/* ══ BODY ════════════════════════════════════════════════ */}
       <div className="app-body">
 
-        {/* ── LEFT PANEL ── */}
+        {/* ── LEFT CONTROL SIDEBAR ── */}
         <aside className="left-panel">
 
-          {/* Search Form */}
-          <div className="panel-section">
-            <p className="panel-title">Plan Your Route</p>
-            <form className="route-form" onSubmit={handleSearch}>
+          {/* Route Planning Card */}
+          <div className="panel-section glass-card">
+            <div className="section-header-row">
+              <p className="panel-title">
+                <Compass size={15} className="title-icon" /> Route Dispatcher
+              </p>
+              {activePicking && (
+                <span className="picking-banner">Click map to set {activePicking}!</span>
+              )}
+            </div>
 
+            <form className="route-form" onSubmit={handleCalculateRoute}>
+              {/* Origin */}
               <div className="form-group">
-                <label htmlFor="start-input">Starting Location</label>
+                <div className="label-row">
+                  <label htmlFor="start-select">Starting Point</label>
+                  <button
+                    type="button"
+                    className={`pick-map-btn ${activePicking === 'start' ? 'active' : ''}`}
+                    onClick={() => setActivePicking(activePicking === 'start' ? null : 'start')}
+                  >
+                    <Crosshair size={12} /> Pick on Map
+                  </button>
+                </div>
                 <div className="input-wrapper">
-                  <MapPin className="input-icon" size={15} />
-                  <input
-                    id="start-input"
-                    type="text"
-                    className="input-field"
-                    placeholder="e.g. Area15"
-                    value={start}
-                    onChange={e => setStart(e.target.value)}
-                    required
-                  />
+                  <span className="dot-indicator green"></span>
+                  <select
+                    id="start-select"
+                    className="input-select"
+                    value={startName}
+                    onChange={(e) => {
+                      const poi = PRESET_POIS.find(p => p.name === e.target.value);
+                      if (poi) handleSelectPreset('start', poi);
+                      else setStartName(e.target.value);
+                    }}
+                  >
+                    {PRESET_POIS.map(p => (
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                    {!PRESET_POIS.some(p => p.name === startName) && (
+                      <option value={startName}>{startName}</option>
+                    )}
+                  </select>
                 </div>
               </div>
 
+              {/* Swap Button */}
+              <div className="swap-row">
+                <button type="button" className="swap-btn" onClick={handleSwap} title="Swap Start & Destination">
+                  <RefreshCw size={13} />
+                </button>
+              </div>
+
+              {/* Destination */}
               <div className="form-group">
-                <label htmlFor="dest-input">Destination</label>
+                <div className="label-row">
+                  <label htmlFor="dest-select">Destination</label>
+                  <button
+                    type="button"
+                    className={`pick-map-btn ${activePicking === 'dest' ? 'active' : ''}`}
+                    onClick={() => setActivePicking(activePicking === 'dest' ? null : 'dest')}
+                  >
+                    <Crosshair size={12} /> Pick on Map
+                  </button>
+                </div>
                 <div className="input-wrapper">
-                  <Navigation className="input-icon" size={15} />
-                  <input
-                    id="dest-input"
-                    type="text"
-                    className="input-field"
-                    placeholder="e.g. Omega Mart"
-                    value={destination}
-                    onChange={e => setDestination(e.target.value)}
-                    required
-                  />
+                  <span className="dot-indicator red"></span>
+                  <select
+                    id="dest-select"
+                    className="input-select"
+                    value={destName}
+                    onChange={(e) => {
+                      const poi = PRESET_POIS.find(p => p.name === e.target.value);
+                      if (poi) handleSelectPreset('dest', poi);
+                      else setDestName(e.target.value);
+                    }}
+                  >
+                    {PRESET_POIS.map(p => (
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                    {!PRESET_POIS.some(p => p.name === destName) && (
+                      <option value={destName}>{destName}</option>
+                    )}
+                  </select>
                 </div>
               </div>
 
+              {/* Travel Mode Selector */}
               <div className="form-group">
                 <label>Travel Mode</label>
                 <div className="mode-selector">
@@ -256,209 +616,483 @@ export default function App() {
                       onClick={() => setMode(m.id)}
                     >
                       <span className="mode-emoji">{m.emoji}</span>
-                      {m.label}
+                      <span className="mode-text">{m.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
+              {/* Heat Avoidance Alpha Slider */}
+              <div className="form-group slider-group">
+                <div className="slider-label-row">
+                  <span className="slider-title">
+                    <Sliders size={12} /> Heat Avoidance Weight
+                  </span>
+                  <span className="slider-val">{heatTolerance}x (Cool Priority)</span>
+                </div>
+                <input
+                  type="range"
+                  min="1.0"
+                  max="10.0"
+                  step="0.5"
+                  className="pro-range"
+                  value={heatTolerance}
+                  onChange={(e) => setHeatTolerance(parseFloat(e.target.value))}
+                />
+                <div className="slider-hints">
+                  <span>Fast Direct (1x)</span>
+                  <span>Balanced (5x)</span>
+                  <span>Max Shade (10x)</span>
+                </div>
+              </div>
+
+              {/* Submit CTA */}
               <button
                 type="submit"
                 className={`submit-btn ${loading ? 'loading' : ''}`}
                 disabled={loading}
               >
-                {loading ? '⟳  Analyzing Heat Corridor…' : '🌡️  Find Coolest Route'}
+                {loading ? (
+                  <>
+                    <RefreshCw size={16} className="spin-icon" /> Computing Thermal Gradient…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} /> Calculate Cool Route
+                  </>
+                )}
               </button>
 
               {error && (
                 <div className="error-msg">
-                  <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  {error}
+                  <AlertTriangle size={15} />
+                  <span>{error}</span>
                 </div>
               )}
             </form>
           </div>
 
-          {/* Data Layers */}
-          <div className="panel-section">
-            <p className="panel-title">Live Data Layers</p>
-            <div className="data-layers">
-              <div className="data-layer-row">
-                <div className="data-layer-label">
-                  <span className={`status-dot ${layerStatus.heat}`} />
-                  🌡️ Thermal Grid
-                </div>
-                <span className="data-layer-count">{heatPts.length} tiles</span>
-              </div>
-              <div className="data-layer-row">
-                <div className="data-layer-label">
-                  <span className={`status-dot ${layerStatus.stops}`} />
-                  ❄️ Cooling Stops
-                </div>
-                <span className="data-layer-count">{coolStops.length} stops</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Route Cards */}
+          {/* Route Comparison Analytics */}
           {routeData && (
-            <div className="panel-section">
-              <p className="panel-title">Route Comparison</p>
-              <div className="route-cards">
+            <div className="panel-section glass-card animate-slide-up">
+              <div className="section-header-row">
+                <p className="panel-title">
+                  <Activity size={15} className="title-icon" /> Route Comparison
+                </p>
+                <button className="export-gpx-btn" onClick={handleExportGPX} title="Export GPX file for Garmin/Apple Watch">
+                  <Download size={13} /> GPX
+                </button>
+              </div>
 
-                {/* Coolest Route */}
-                <div className="route-card cool">
+              {/* Simulation Navigator Controls */}
+              <div className="nav-sim-bar">
+                <div className="sim-status">
+                  <span className={`sim-indicator ${isNavigating ? 'active' : ''}`} />
+                  <span>{isNavigating ? `Navigating (${navIndex + 1}/${coolPath.length})` : 'GPS Route Simulator'}</span>
+                </div>
+                <div className="sim-actions">
+                  <button
+                    type="button"
+                    className="sim-btn voice"
+                    onClick={() => setNavVoice(!navVoice)}
+                    title={navVoice ? 'Voice Guidance Enabled' : 'Voice Muted'}
+                  >
+                    {navVoice ? <Volume2 size={14} color="#38bdf8" /> : <VolumeX size={14} color="#64748b" />}
+                  </button>
+                  <button
+                    type="button"
+                    className="sim-btn"
+                    onClick={() => { setNavIndex(0); setIsNavigating(false); }}
+                    title="Reset Simulation"
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`sim-btn primary ${isNavigating ? 'pause' : 'play'}`}
+                    onClick={() => setIsNavigating(!isNavigating)}
+                  >
+                    {isNavigating ? <Pause size={14} /> : <Play size={14} />}
+                    {isNavigating ? 'Pause' : 'Start Walk'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Side-by-side Cards */}
+              <div className="route-cards">
+                {/* Cool Route */}
+                <div className="route-card cool highlight">
                   <div className="route-card-header">
                     <div className="route-title">
                       <TreePine size={16} color="#10b981" />
-                      Coolest Route
+                      <span>Coolest Corridor</span>
                     </div>
                     <span className="badge cool">Recommended</span>
                   </div>
-                  <div className="route-stats">
-                    <Stat icon={Thermometer} label="Avg Temp"  value={`${routeData.cool_route.avg_temp_c}°C`} />
-                    <Stat icon={Navigation}  label="Distance"  value={`${routeData.cool_route.distance_m} m`} />
-                    <Stat icon={Clock}       label="Travel Time" value={`${routeData.cool_route.duration_min} min`} />
-                    <Stat icon={Activity}    label="Heat Index" value={routeData.cool_route.heat_exposure_index} />
+                  <div className="route-stats-grid">
+                    <div className="stat-box">
+                      <span className="stat-label">Avg Temp</span>
+                      <span className="stat-value cool">{routeData.cool_route.avg_temp_c}°C</span>
+                    </div>
+                    <div className="stat-box">
+                      <span className="stat-label">Travel Time</span>
+                      <span className="stat-value">{routeData.cool_route.duration_min} min</span>
+                    </div>
+                    <div className="stat-box">
+                      <span className="stat-label">Distance</span>
+                      <span className="stat-value">{routeData.cool_route.distance_m} m</span>
+                    </div>
+                    <div className="stat-box">
+                      <span className="stat-label">Heat Index</span>
+                      <span className="stat-value">{routeData.cool_route.heat_exposure_index}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Fastest Route */}
-                <div className="route-card fast">
+                {/* Fastest Hot Route */}
+                <div className="route-card hot">
                   <div className="route-card-header">
                     <div className="route-title">
                       <Flame size={16} color="#ef4444" />
-                      Fastest Route
+                      <span>Direct / High Heat</span>
                     </div>
-                    <span className="badge hot">High Risk</span>
+                    <span className="badge hot">High Exposure</span>
                   </div>
-                  <div className="route-stats">
-                    <Stat icon={Thermometer} label="Avg Temp"  value={`${routeData.hot_route.avg_temp_c}°C`} />
-                    <Stat icon={Navigation}  label="Distance"  value={`${routeData.hot_route.distance_m} m`} />
-                    <Stat icon={Clock}       label="Travel Time" value={`${routeData.hot_route.duration_min} min`} />
-                    <Stat icon={Activity}    label="Heat Index" value={routeData.hot_route.heat_exposure_index} />
+                  <div className="route-stats-grid">
+                    <div className="stat-box">
+                      <span className="stat-label">Avg Temp</span>
+                      <span className="stat-value hot">{routeData.hot_route.avg_temp_c}°C</span>
+                    </div>
+                    <div className="stat-box">
+                      <span className="stat-label">Travel Time</span>
+                      <span className="stat-value">{routeData.hot_route.duration_min} min</span>
+                    </div>
+                    <div className="stat-box">
+                      <span className="stat-label">Distance</span>
+                      <span className="stat-value">{routeData.hot_route.distance_m} m</span>
+                    </div>
+                    <div className="stat-box">
+                      <span className="stat-label">Heat Index</span>
+                      <span className="stat-value">{routeData.hot_route.heat_exposure_index}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Summary */}
-                <div className="route-card info">
-                  <div style={{ fontSize: '0.82rem', lineHeight: 1.65, color: '#cbd5e1' }}>
-                    <Zap size={13} style={{ display:'inline', marginRight: 4, verticalAlign: 'middle' }} color="#60a5fa" />
-                    The Coolest Route reduces your heat exposure by{' '}
-                    <strong style={{ color: '#34d399' }}>{Math.abs(routeData.exposure_reduction_pct)}%</strong>
-                    {' '}with only <strong style={{ color: '#fbbf24' }}>{routeData.extra_distance_m} m</strong> extra distance.
-                    {coolStops.length > 0 && (
-                      <> There are <strong style={{ color: '#93c5fd' }}>{coolStops.length} ❄️ cooling stops</strong> along the corridor.</>
-                    )}
+                {/* Impact Delta Callout */}
+                <div className="impact-delta-card">
+                  <div className="impact-header">
+                    <Zap size={15} color="#38bdf8" />
+                    <strong>Thermal Defense Impact</strong>
                   </div>
+                  <p>
+                    By taking the shaded corridor, you reduce heat exposure by{' '}
+                    <strong className="text-emerald">{Math.abs(routeData.exposure_reduction_pct)}%</strong>{' '}
+                    with only <strong className="text-amber">{routeData.extra_distance_m} m</strong> detour.
+                  </p>
                 </div>
-
               </div>
-            </div>
-          )}
 
-          {/* How it works (placeholder when no route yet) */}
-          {!routeData && (
-            <div className="panel-section">
-              <p className="panel-title">How It Works</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {[
-                  { n: '01', t: 'Thermal Analysis', d: 'FortyGuard temperature grid overlaid on the street network' },
-                  { n: '02', t: 'Dual Pathfinding',  d: 'NetworkX finds shortest and heat-weighted coolest routes' },
-                  { n: '03', t: 'Smart Comparison',  d: 'Real heat exposure index (temp × time) compared per route' },
-                ].map(s => (
-                  <div key={s.n} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
-                    <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#3b82f6', background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', borderRadius: 4, padding: '0.15rem 0.4rem', flexShrink: 0 }}>{s.n}</span>
-                    <div>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#f1f5f9' }}>{s.t}</div>
-                      <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4 }}>{s.d}</div>
+              {/* Health & Hydration Biometrics */}
+              {healthStats && (
+                <div className="health-hud-section">
+                  <div className="health-hud-title">
+                    <ShieldCheck size={14} color="#10b981" /> Biometric & Health Advisories
+                  </div>
+                  <div className="health-grid">
+                    <div className="health-card">
+                      <Droplets size={16} color="#38bdf8" />
+                      <div>
+                        <span className="health-val">{healthStats.sweatRateMl} ml</span>
+                        <span className="health-lbl">Est. Fluid Loss</span>
+                      </div>
+                    </div>
+                    <div className="health-card">
+                      <Sun size={16} color="#f59e0b" />
+                      <div>
+                        <span className="health-val" style={{ color: healthStats.riskColor }}>
+                          {healthStats.riskLevel}
+                        </span>
+                        <span className="health-lbl">Heat Stress Risk</span>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           )}
+
+          {/* Cooling Oasis Quick List */}
+          <div className="panel-section glass-card">
+            <p className="panel-title">
+              <Snowflake size={15} className="title-icon" /> Shaded Cooling Stops ({coolStops.length})
+            </p>
+            <div className="cooling-stops-list">
+              {coolStops.map((stop, idx) => (
+                <div
+                  key={idx}
+                  className="cooling-stop-item"
+                  onClick={() => {
+                    handleSelectPreset('dest', { name: `Cooling Oasis #${idx + 1}`, lat: stop.lat, lon: stop.lon });
+                  }}
+                  title="Click to set as destination"
+                >
+                  <div className="stop-icon-col">❄️</div>
+                  <div className="stop-info-col">
+                    <div className="stop-name">Cooling Station #{idx + 1}</div>
+                    <div className="stop-details">
+                      Ambient: <strong className="text-sky">{stop.temp_c?.toFixed(1)}°C</strong> · Shaded Rest Oasis
+                    </div>
+                  </div>
+                  <ArrowRight size={14} className="stop-arrow" />
+                </div>
+              ))}
+            </div>
+          </div>
 
         </aside>
 
-        {/* ── RIGHT PANEL (MAP) ── */}
+        {/* ── RIGHT MAP CANVAS ── */}
         <main className="right-panel">
           <div className="map-container-wrapper">
 
-            {/* Info chip */}
-            <div className="map-chip">
-              <strong>Las Vegas Heat Corridor</strong>
-              FortyGuard AOI · 36.11°N, 115.17°W
+            {/* Top Interactive HUD */}
+            <div className="map-top-bar">
+              <div className="map-chip-pro">
+                <span className="chip-indicator" />
+                <div>
+                  <strong>Las Vegas Thermal Corridor</strong>
+                  <span>AOI: 36.11°N, 115.17°W · FortyGuard AI Grid ({heatPts.length} sensors)</span>
+                </div>
+              </div>
+
+              {/* Basemap Switcher */}
+              <div className="basemap-selector-pill">
+                <Layers size={14} className="layer-icon" />
+                {Object.entries(BASEMAPS).map(([key, bm]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`basemap-btn ${basemapKey === key ? 'active' : ''}`}
+                    onClick={() => setBasemapKey(key)}
+                    title={`Switch to ${bm.name}`}
+                  >
+                    <span>{bm.icon}</span>
+                    <span className="btn-label">{bm.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
+            {/* Layer Toggles Floating Island */}
+            <div className="map-floating-controls">
+              <button
+                type="button"
+                className={`float-toggle-btn ${showHeatmap ? 'active' : ''}`}
+                onClick={() => setShowHeatmap(!showHeatmap)}
+              >
+                🌡️ Heatmap {showHeatmap ? 'ON' : 'OFF'}
+              </button>
+              <button
+                type="button"
+                className={`float-toggle-btn ${showCoolingStops ? 'active' : ''}`}
+                onClick={() => setShowCoolingStops(!showCoolingStops)}
+              >
+                ❄️ Cooling Stops ({coolStops.length})
+              </button>
+            </div>
+
+            {/* Active Simulation HUD Overlay */}
+            {isNavigating && activeNavPosition && (
+              <div className="nav-active-hud animate-slide-down">
+                <div className="nav-hud-col">
+                  <span className="nav-hud-label">SIMULATED SPEED</span>
+                  <span className="nav-hud-value">
+                    {MODES.find(m => m.id === mode)?.speed} km/h
+                  </span>
+                </div>
+                <div className="nav-hud-divider" />
+                <div className="nav-hud-col">
+                  <span className="nav-hud-label">SEGMENT TEMP</span>
+                  <span className="nav-hud-value cool">
+                    {routeData?.cool_route?.avg_temp_c}°C
+                  </span>
+                </div>
+                <div className="nav-hud-divider" />
+                <div className="nav-hud-col">
+                  <span className="nav-hud-label">PROGRESS</span>
+                  <span className="nav-hud-value text-emerald">
+                    {Math.round((navIndex / Math.max(1, coolPath.length - 1)) * 100)}%
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Map Container */}
             <MapContainer
               center={MAP_CENTER}
               zoom={15}
               style={{ height: '100%', width: '100%' }}
               zoomControl={true}
             >
-              {/* CartoDB Dark Matter — free, no API key */}
+              <MapViewController bounds={routeBounds} />
+              <MapClickHandler activePicking={activePicking} onLocationPicked={handleLocationPicked} />
+
+              {/* Clean Basemap Tiles (Zero Watermarks) */}
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                subdomains="abcd"
-                maxZoom={20}
+                key={basemapKey}
+                attribution={BASEMAPS[basemapKey].attribution}
+                url={BASEMAPS[basemapKey].base}
+                subdomains={BASEMAPS[basemapKey].subdomains || []}
+                maxZoom={BASEMAPS[basemapKey].maxZoom || 18}
+                className={BASEMAPS[basemapKey].cssClass || ''}
               />
 
-              {/* Thermal heatmap overlay */}
-              {heatPts.length > 0 && <HeatmapLayer points={heatPts} />}
-
-              {/* Cool route — solid green */}
-              {coolPath.length > 0 && (
-                <Polyline
-                  positions={coolPath}
-                  pathOptions={{ color: '#10b981', weight: 6, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }}
+              {/* Reference / Labels overlay for ESRI */}
+              {BASEMAPS[basemapKey].ref && (
+                <TileLayer
+                  key={`${basemapKey}-ref`}
+                  url={BASEMAPS[basemapKey].ref}
+                  maxZoom={BASEMAPS[basemapKey].maxZoom || 18}
                 />
               )}
 
-              {/* Hot route — dashed red */}
+              {/* Thermal Heatmap Overlay */}
+              {showHeatmap && heatPts.length > 0 && (
+                <HeatmapLayer points={heatPts} intensity={1.0} />
+              )}
+
+              {/* Cool Route — Vibrant Green Glow */}
+              {coolPath.length > 0 && (
+                <>
+                  <Polyline
+                    positions={coolPath}
+                    pathOptions={{
+                      color: '#059669',
+                      weight: 9,
+                      opacity: 0.4,
+                      lineCap: 'round',
+                      lineJoin: 'round',
+                    }}
+                  />
+                  <Polyline
+                    positions={coolPath}
+                    pathOptions={{
+                      color: '#10b981',
+                      weight: 5,
+                      opacity: 0.98,
+                      lineCap: 'round',
+                      lineJoin: 'round',
+                    }}
+                  />
+                </>
+              )}
+
+              {/* Hot Route — Dashed Amber/Red */}
               {hotPath.length > 0 && (
                 <Polyline
                   positions={hotPath}
-                  pathOptions={{ color: '#ef4444', weight: 4, opacity: 0.7, dashArray: '9, 13' }}
+                  pathOptions={{
+                    color: '#ef4444',
+                    weight: 3.5,
+                    opacity: 0.75,
+                    dashArray: '8, 12',
+                    lineCap: 'round',
+                  }}
                 />
               )}
 
-              {/* Start marker */}
-              {hotPath.length > 0 && (
-                <Marker position={hotPath[0]}>
+              {/* Start Marker */}
+              {startCoords && (
+                <Marker position={[startCoords.lat, startCoords.lon]} icon={StartIcon}>
                   <Popup>
-                    <div className="popup-title">📍 Start</div>
-                    <div className="popup-detail">{start}</div>
+                    <div className="popup-pro">
+                      <div className="popup-header">🟢 Origin</div>
+                      <div className="popup-title">{startName}</div>
+                      <div className="popup-coords">{startCoords.lat.toFixed(5)}, {startCoords.lon.toFixed(5)}</div>
+                    </div>
                   </Popup>
                 </Marker>
               )}
 
-              {/* Destination marker */}
-              {hotPath.length > 0 && (
-                <Marker position={hotPath[hotPath.length - 1]}>
+              {/* Destination Marker */}
+              {destCoords && (
+                <Marker position={[destCoords.lat, destCoords.lon]} icon={DestIcon}>
                   <Popup>
-                    <div className="popup-title">🏁 Destination</div>
-                    <div className="popup-detail">{destination}</div>
+                    <div className="popup-pro">
+                      <div className="popup-header">🏁 Destination</div>
+                      <div className="popup-title">{destName}</div>
+                      <div className="popup-coords">{destCoords.lat.toFixed(5)}, {destCoords.lon.toFixed(5)}</div>
+                    </div>
                   </Popup>
                 </Marker>
               )}
 
-              {/* ❄️ Cooling Stop pins */}
-              {coolStops.map((stop, idx) => (
+              {/* Active Simulated Position Marker */}
+              {isNavigating && activeNavPosition && (
+                <Marker position={activeNavPosition} icon={SimNavIcon}>
+                  <Popup>
+                    <div className="popup-pro">
+                      <div className="popup-header">🧭 Live Simulation Active</div>
+                      <div className="popup-title">Advancing through cool corridor</div>
+                    </div>
+                  </Popup>
+                </Marker>
+              )}
+
+              {/* Cooling Stop Markers */}
+              {showCoolingStops && coolStops.map((stop, idx) => (
                 <Marker key={idx} position={[stop.lat, stop.lon]} icon={CoolingIcon}>
                   <Popup>
-                    <div className="popup-title">❄️ Cooling Stop #{idx + 1}</div>
-                    <div className="popup-detail">
-                      Temp: {stop.temp_c?.toFixed(2)}°C<br />
-                      <span style={{ color: '#60a5fa' }}>Shaded rest area — reduce heat exposure here</span>
+                    <div className="popup-pro">
+                      <div className="popup-header">❄️ Cooling Oasis #{idx + 1}</div>
+                      <div className="popup-temp">
+                        Ambient Temp: <strong>{stop.temp_c?.toFixed(1)}°C</strong>
+                      </div>
+                      <p className="popup-desc">Verified urban shade zone. Lower heat index oasis.</p>
+                      <button
+                        className="popup-cta-btn"
+                        onClick={() => {
+                          setDestCoords({ lat: stop.lat, lon: stop.lon });
+                          setDestName(`Cooling Stop #${idx + 1}`);
+                          handleCalculateRoute();
+                        }}
+                      >
+                        Route To This Oasis ➔
+                      </button>
                     </div>
                   </Popup>
                 </Marker>
               ))}
             </MapContainer>
 
-            <MapLegend hasRoutes={routeData != null} />
+            {/* Map Legend */}
+            <div className="map-legend-pro">
+              <div className="legend-title">Route Telemetry</div>
+              {routeData && (
+                <>
+                  <div className="legend-row">
+                    <div className="legend-line cool-line" />
+                    <span>Coolest Path ({routeData.cool_route.avg_temp_c}°C)</span>
+                  </div>
+                  <div className="legend-row">
+                    <div className="legend-line hot-line" />
+                    <span>Fastest Path ({routeData.hot_route.avg_temp_c}°C)</span>
+                  </div>
+                </>
+              )}
+              <div className="legend-row">
+                <div className="legend-dot cool-dot" />
+                <span>❄️ Shaded Oasis</span>
+              </div>
+              <div className="legend-row">
+                <div className="heat-scale-bar" />
+                <div className="heat-scale-labels">
+                  <span>Cooler</span>
+                  <span>Extreme Heat</span>
+                </div>
+              </div>
+            </div>
+
           </div>
         </main>
       </div>
